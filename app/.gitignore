@@ -1,0 +1,45 @@
+/build
+# Built application files
+*.apk
+*.aab
+*.ap_
+
+# Build directories
+build/
+app/build/
+
+# Local configuration
+local.properties
+*.local.properties
+
+# IntelliJ IDEA
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# Gradle
+.gradle/
+gradle/wrapper/gradle-wrapper.jar
+
+# Keystore files (never commit these)
+*.jks
+*.keystore
+
+# Log files
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Python cache (Chaquopy)
+__pycache__/
+*.pyc
+*.pyo
+
+# NDK/JNI (optional - keep if you want to track binaries)
+# app/src/main/jniLibs/
+
+# Generated files
+app/src/main/assets/chaquopy/

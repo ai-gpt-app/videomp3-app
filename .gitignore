@@ -1,0 +1,74 @@
+### Android template
+# Gradle files
+.gradle/
+build/
+
+# Local configuration file (sdk path, etc)
+local.properties
+
+# Log/OS Files
+*.log
+
+# Android Studio generated files and folders
+captures/
+.externalNativeBuild/
+.cxx/
+*.apk
+output.json
+
+# IntelliJ
+*.iml
+.idea/
+misc.xml
+deploymentTargetDropDown.xml
+render.experimental.xml
+
+# Keystore files
+*.jks
+*.keystore
+
+# Google Services (e.g. APIs or Firebase)
+google-services.json
+
+# Android Profiling
+*.hprof
+
+# Built application files
+
+*.aab
+*.ap_
+
+# Build directories
+
+app/build/
+
+# Local configuration
+*.local.properties
+
+# IntelliJ IDEA
+*.iws
+*.ipr
+
+# Gradle
+
+gradle/wrapper/gradle-wrapper.jar
+
+
+
+
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Python cache (Chaquopy)
+__pycache__/
+*.pyc
+*.pyo
+
+# NDK/JNI (optional - keep if you want to track binaries)
+# app/src/main/jniLibs/
+
+# Generated files
+app/src/main/assets/chaquopy/
+
