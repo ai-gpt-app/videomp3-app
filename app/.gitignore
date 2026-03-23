@@ -43,3 +43,6 @@ __pycache__/
 
 # Generated files
 app/src/main/assets/chaquopy/
+/app/release/
+# Build folders
+/build/

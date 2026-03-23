@@ -21,9 +21,14 @@ class DownloadService : Service() {
         const val EXTRA_QUALITY = "quality"
     }
 
-    private val scope = CoroutineScope(Dispatchers.IO)
+    private val scope = CoroutineScope(Dispatchers.IO + kotlinx.coroutines.SupervisorJob())
 
     override fun onBind(intent: Intent?): IBinder? = null
+
+    override fun onDestroy() {
+        super.onDestroy()
+        scope.coroutineContext[kotlinx.coroutines.Job]?.cancel()
+    }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val url = intent?.getStringExtra(EXTRA_URL) ?: run {
@@ -42,9 +47,11 @@ class DownloadService : Service() {
                 android.util.Log.d("DownloadService", "Starting download coroutine")
                 val outputDir = download(url, quality)
                 showCompletedNotification(outputDir)
+                kotlinx.coroutines.delay(1000)
             } catch (e: Exception) {
                 android.util.Log.e("DownloadService", "Download failed: ${e.message}", e)
                 showErrorNotification(e.message ?: "Unknown error")
+                kotlinx.coroutines.delay(1000)
             } finally {
                 stopSelf()
             }
@@ -68,12 +75,12 @@ class DownloadService : Service() {
             else   -> "bestaudio[ext=webm]/bestaudio/best"
         }
 
-        val dateStr = java.time.LocalDate.now()
-            .format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd"))
+        val dateStr = java.time.LocalDateTime.now()
+            .format(java.time.format.DateTimeFormatter.ofPattern("yyMMdd_HHmmss"))
 
         val dict = builtins.callAttr("dict")
         dict.callAttr("__setitem__", "format", format)
-        dict.callAttr("__setitem__", "outtmpl", "$outputDir/gurudev_${dateStr}_%(autonumber)s.%(ext)s")
+        dict.callAttr("__setitem__", "outtmpl", "$outputDir/%(title).30s_${dateStr}.%(ext)s")
         dict.callAttr("__setitem__", "noplaylist", true)
         dict.callAttr("__setitem__", "quiet", true)
 
@@ -92,6 +99,7 @@ class DownloadService : Service() {
         hookList.callAttr("append", hook)
         dict.callAttr("__setitem__", "progress_hooks", hookList)
 
+        try { py.getModule("patch") } catch (e: Exception) { }
         val ydl = ytdlp.callAttr("YoutubeDL", dict)
         ydl.callAttr("__enter__")
 
@@ -196,6 +204,36 @@ class DownloadService : Service() {
             arrayOf(filePath),
             arrayOf("audio/mpeg"),
             null
+        )
+    }
+
+    fun fetchVideoInfo(url: String): Map<String, String> {
+        val py = Python.getInstance()
+        val ytdlp = py.getModule("yt_dlp")
+        val builtins = py.builtins
+
+        val dict = builtins.callAttr("dict")
+        dict.callAttr("__setitem__", "quiet", true)
+        dict.callAttr("__setitem__", "skip_download", true)
+        dict.callAttr("__setitem__", "no_color", true)
+
+        val ydl = ytdlp.callAttr("YoutubeDL", dict)
+        val info = ydl.callAttr("extract_info", url, false)
+
+        val title = try { info.callAttr("get", "title").toString() } catch (e: Exception) { "Unknown" }
+        val duration = try { info.callAttr("get", "duration").toString().toIntOrNull() ?: 0 } catch (e: Exception) { 0 }
+        val thumbnail = try { info.callAttr("get", "thumbnail").toString() } catch (e: Exception) { "" }
+        val uploader = try { info.callAttr("get", "uploader").toString() } catch (e: Exception) { "Unknown" }
+
+        val minutes = (duration as Int) / 60
+        val seconds = duration % 60
+        val durationStr = "%d:%02d".format(minutes, seconds)
+
+        return mapOf(
+            "title" to title,
+            "duration" to durationStr,
+            "thumbnail" to thumbnail,
+            "uploader" to uploader
         )
     }
 }

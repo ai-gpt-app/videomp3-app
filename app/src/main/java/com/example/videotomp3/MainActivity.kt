@@ -2,12 +2,16 @@ package com.example.videotomp3
 
 import android.content.Intent
 import android.os.Bundle
+import android.view.View
 import android.widget.Button
 import android.widget.EditText
+import android.widget.ImageView
 import android.widget.RadioGroup
 import android.widget.TextView
 import androidx.activity.ComponentActivity
+import androidx.cardview.widget.CardView
 import androidx.lifecycle.lifecycleScope
+import com.bumptech.glide.Glide
 import com.chaquo.python.Python
 import com.chaquo.python.android.AndroidPlatform
 import kotlinx.coroutines.Dispatchers
@@ -20,15 +24,87 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
         requestPermissions()
+
         val urlInput = findViewById<EditText>(R.id.urlInput)
+        val fetchButton = findViewById<Button>(R.id.fetchButton)
         val convertButton = findViewById<Button>(R.id.convertButton)
         val statusText = findViewById<TextView>(R.id.statusText)
         val qualityGroup = findViewById<RadioGroup>(R.id.qualityGroup)
+        val previewCard = findViewById<CardView>(R.id.previewCard)
+        val videoThumbnail = findViewById<ImageView>(R.id.videoThumbnail)
+        val videoTitle = findViewById<TextView>(R.id.videoTitle)
+        val videoUploader = findViewById<TextView>(R.id.videoUploader)
+        val videoDuration = findViewById<TextView>(R.id.videoDuration)
 
         if (!Python.isStarted()) {
             Python.start(AndroidPlatform(this))
         }
 
+        // Fetch video info
+        fetchButton.setOnClickListener {
+            val url = urlInput.text.toString().trim()
+            if (url.isEmpty()) {
+                statusText.text = "Please enter a video URL"
+                return@setOnClickListener
+            }
+
+            statusText.text = "Fetching video info..."
+            fetchButton.isEnabled = false
+            previewCard.visibility = View.GONE
+
+            lifecycleScope.launch {
+                try {
+                    val info = withContext(Dispatchers.IO) {
+                        val py = Python.getInstance()
+                        val ytdlp = py.getModule("yt_dlp")
+                        val builtins = py.builtins
+
+                        val dict = builtins.callAttr("dict")
+                        dict.callAttr("__setitem__", "quiet", true)
+                        dict.callAttr("__setitem__", "skip_download", true)
+                        dict.callAttr("__setitem__", "no_color", true)
+
+                        val ydl = ytdlp.callAttr("YoutubeDL", dict)
+                        val rawInfo = ydl.callAttr("extract_info", url, false)
+
+                        val title = try { rawInfo.callAttr("get", "title").toString() } catch (e: Exception) { "Unknown" }
+                        val duration = try { rawInfo.callAttr("get", "duration").toString().toIntOrNull() ?: 0 } catch (e: Exception) { 0 }
+                        val thumbnail = try { rawInfo.callAttr("get", "thumbnail").toString() } catch (e: Exception) { "" }
+                        val uploader = try { rawInfo.callAttr("get", "uploader").toString() } catch (e: Exception) { "Unknown" }
+
+                        val minutes = duration / 60
+                        val seconds = duration % 60
+                        val durationStr = "%d:%02d".format(minutes, seconds)
+
+                        mapOf(
+                            "title" to title,
+                            "duration" to durationStr,
+                            "thumbnail" to thumbnail,
+                            "uploader" to uploader
+                        )
+                    }
+
+                    // Show preview card
+                    previewCard.visibility = View.VISIBLE
+                    videoTitle.text = info["title"]
+                    videoUploader.text = "📺 ${info["uploader"]}"
+                    videoDuration.text = "⏱ ${info["duration"]}"
+
+                    Glide.with(this@MainActivity)
+                        .load(info["thumbnail"])
+                        .into(videoThumbnail)
+
+                    statusText.text = "Ready to download!"
+
+                } catch (e: Exception) {
+                    statusText.text = "❌ Error: ${e.message}"
+                } finally {
+                    fetchButton.isEnabled = true
+                }
+            }
+        }
+
+        // Download
         convertButton.setOnClickListener {
             val url = urlInput.text.toString().trim()
 
@@ -36,102 +112,30 @@ class MainActivity : ComponentActivity() {
                 statusText.text = "Please enter a video URL"
                 return@setOnClickListener
             }
+
             val quality = when (qualityGroup.checkedRadioButtonId) {
                 R.id.qualityLow    -> "low"
                 R.id.qualityMedium -> "medium"
                 else               -> "high"
             }
 
-            // Request notification permission on Android 13+
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-                requestPermissions(
-                    arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1
-                )
-            }
-
-            // Start background download service
             val intent = Intent(this, DownloadService::class.java)
             intent.putExtra(DownloadService.EXTRA_URL, url)
             intent.putExtra(DownloadService.EXTRA_QUALITY, quality)
             startForegroundService(intent)
-            statusText.text = "Download started ($quality quality)! Check notification bar."
-        }
-    }
 
-    private suspend fun runConversion(url: String, statusText: TextView) {
-        withContext(Dispatchers.IO) {
-            try {
-                val py = Python.getInstance()
-                val ytdlp = py.getModule("yt_dlp")
-
-                val outputDir = applicationContext.getExternalFilesDir(
-                    android.os.Environment.DIRECTORY_MUSIC
-                )?.absolutePath ?: applicationContext.filesDir.absolutePath
-
-                updateUI(statusText, "Downloading...\nSaving to:\n$outputDir")
-
-                val builtins = py.builtins
-                val dict = builtins.callAttr("dict")
-                dict.callAttr("__setitem__", "format", "bestaudio/best")
-                dict.callAttr("__setitem__", "outtmpl", "$outputDir/%(title)s.%(ext)s")
-                dict.callAttr("__setitem__", "noplaylist", true)
-                dict.callAttr("__setitem__", "quiet", false)
-                dict.callAttr("__setitem__", "no_warnings", false)
-
-                // Add headers to mimic browser
-                val headers = builtins.callAttr("dict")
-                headers.callAttr("__setitem__", "User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-                headers.callAttr("__setitem__", "Accept-Language", "en-US,en;q=0.9")
-                dict.callAttr("__setitem__", "http_headers", headers)
-
-                // Use android client instead of web
-                dict.callAttr("__setitem__", "extractor_args",
-                    builtins.callAttr("dict").also { d ->
-                        val clientList = builtins.callAttr("list")
-                        clientList.callAttr("append", "android")
-                        d.callAttr("__setitem__", "youtube",
-                            builtins.callAttr("dict").also { inner ->
-                                inner.callAttr("__setitem__", "player_client", clientList)
-                            }
-                        )
-                    }
-                )
-
-                val ydl = ytdlp.callAttr("YoutubeDL", dict)
-                ydl.callAttr("__enter__")
-
-                try {
-                    val pyList = builtins.callAttr("list")
-                    pyList.callAttr("append", url)
-                    ydl.callAttr("download", pyList)
-                    updateUI(statusText, "✅ Done! File saved to:\n$outputDir")
-                } finally {
-                    ydl.callAttr("__exit__", null, null, null)
-                }
-
-            } catch (e: Exception) {
-                updateUI(statusText, "❌ Error:\n${e.message}")
-            }
-        }
-    }
-
-    private suspend fun updateUI(textView: TextView, msg: String) {
-        withContext(Dispatchers.Main) {
-            textView.text = msg
+            statusText.text = "Download started ($quality quality)!\nCheck notification bar."
         }
     }
 
     private fun requestPermissions() {
         val permissions = mutableListOf<String>()
-
-        // Only needed on Android 13+
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
             if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)
                 != android.content.pm.PackageManager.PERMISSION_GRANTED) {
                 permissions.add(android.Manifest.permission.POST_NOTIFICATIONS)
             }
         }
-
         if (permissions.isNotEmpty()) {
             requestPermissions(permissions.toTypedArray(), 100)
         }

@@ -9,6 +9,15 @@ android {
     namespace = "com.example.videotomp3"
     compileSdk = 36
 
+    applicationVariants.all {
+        outputs.all {
+            val outputImpl = this as com.android.build.gradle.internal.api.BaseVariantOutputImpl
+            outputImpl.outputFileName = "VideoToMP3-${name}.apk"
+        }
+    }
+
+
+
     defaultConfig {
         applicationId = "com.example.videotomp3"
         minSdk = 32
@@ -63,6 +72,7 @@ chaquopy {
 }
 
 dependencies {
+    implementation("com.github.bumptech.glide:glide:4.16.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("androidx.core:core-ktx:1.10.1")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.6.1")

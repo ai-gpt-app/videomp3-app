@@ -72,3 +72,9 @@ __pycache__/
 # Generated files
 app/src/main/assets/chaquopy/
 
+# Generated files
+/app/release/
+# Build folders
+/build/
+vidtomp3
+
