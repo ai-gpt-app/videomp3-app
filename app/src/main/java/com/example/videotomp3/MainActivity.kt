@@ -2,6 +2,8 @@ package com.example.videotomp3
 
 import android.content.Intent
 import android.os.Bundle
+import android.text.Editable
+import android.text.TextWatcher
 import android.view.View
 import android.widget.Button
 import android.widget.EditText
@@ -15,10 +17,15 @@ import com.bumptech.glide.Glide
 import com.chaquo.python.Python
 import com.chaquo.python.android.AndroidPlatform
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
+
+    private var fetchJob: Job? = null
+    private var debounceJob: Job? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -26,7 +33,6 @@ class MainActivity : ComponentActivity() {
         requestPermissions()
 
         val urlInput = findViewById<EditText>(R.id.urlInput)
-        val fetchButton = findViewById<Button>(R.id.fetchButton)
         val convertButton = findViewById<Button>(R.id.convertButton)
         val statusText = findViewById<TextView>(R.id.statusText)
         val qualityGroup = findViewById<RadioGroup>(R.id.qualityGroup)
@@ -40,69 +46,21 @@ class MainActivity : ComponentActivity() {
             Python.start(AndroidPlatform(this))
         }
 
-        // Fetch video info
-        fetchButton.setOnClickListener {
-            val url = urlInput.text.toString().trim()
-            if (url.isEmpty()) {
-                statusText.text = "Please enter a video URL"
-                return@setOnClickListener
-            }
-
-            statusText.text = "Fetching video info..."
-            fetchButton.isEnabled = false
-            previewCard.visibility = View.GONE
-
-            lifecycleScope.launch {
-                try {
-                    val info = withContext(Dispatchers.IO) {
-                        val py = Python.getInstance()
-                        val ytdlp = py.getModule("yt_dlp")
-                        val builtins = py.builtins
-
-                        val dict = builtins.callAttr("dict")
-                        dict.callAttr("__setitem__", "quiet", true)
-                        dict.callAttr("__setitem__", "skip_download", true)
-                        dict.callAttr("__setitem__", "no_color", true)
-
-                        val ydl = ytdlp.callAttr("YoutubeDL", dict)
-                        val rawInfo = ydl.callAttr("extract_info", url, false)
-
-                        val title = try { rawInfo.callAttr("get", "title").toString() } catch (e: Exception) { "Unknown" }
-                        val duration = try { rawInfo.callAttr("get", "duration").toString().toIntOrNull() ?: 0 } catch (e: Exception) { 0 }
-                        val thumbnail = try { rawInfo.callAttr("get", "thumbnail").toString() } catch (e: Exception) { "" }
-                        val uploader = try { rawInfo.callAttr("get", "uploader").toString() } catch (e: Exception) { "Unknown" }
-
-                        val minutes = duration / 60
-                        val seconds = duration % 60
-                        val durationStr = "%d:%02d".format(minutes, seconds)
-
-                        mapOf(
-                            "title" to title,
-                            "duration" to durationStr,
-                            "thumbnail" to thumbnail,
-                            "uploader" to uploader
-                        )
+        // Auto-fetch video info with debouncing
+        urlInput.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: Editable?) {
+                debounceJob?.cancel()
+                debounceJob = lifecycleScope.launch {
+                    delay(800) // Wait for user to stop typing
+                    val url = s?.toString()?.trim() ?: ""
+                    if (url.isNotEmpty()) {
+                        fetchVideoInfo(url, statusText, previewCard, videoThumbnail, videoTitle, videoUploader, videoDuration)
                     }
-
-                    // Show preview card
-                    previewCard.visibility = View.VISIBLE
-                    videoTitle.text = info["title"]
-                    videoUploader.text = "📺 ${info["uploader"]}"
-                    videoDuration.text = "⏱ ${info["duration"]}"
-
-                    Glide.with(this@MainActivity)
-                        .load(info["thumbnail"])
-                        .into(videoThumbnail)
-
-                    statusText.text = "Ready to download!"
-
-                } catch (e: Exception) {
-                    statusText.text = "❌ Error: ${e.message}"
-                } finally {
-                    fetchButton.isEnabled = true
                 }
             }
-        }
+        })
 
         // Download
         convertButton.setOnClickListener {
@@ -125,6 +83,72 @@ class MainActivity : ComponentActivity() {
             startForegroundService(intent)
 
             statusText.text = "Download started ($quality quality)!\nCheck notification bar."
+        }
+    }
+
+    private fun fetchVideoInfo(
+        url: String,
+        statusText: TextView,
+        previewCard: CardView,
+        videoThumbnail: ImageView,
+        videoTitle: TextView,
+        videoUploader: TextView,
+        videoDuration: TextView
+    ) {
+        // Cancel previous fetch
+        fetchJob?.cancel()
+        
+        statusText.text = "Fetching video info..."
+        previewCard.visibility = View.GONE
+
+        fetchJob = lifecycleScope.launch {
+            try {
+                val info = withContext(Dispatchers.IO) {
+                    val py = Python.getInstance()
+                    val ytdlp = py.getModule("yt_dlp")
+                    val builtins = py.builtins
+
+                    val dict = builtins.callAttr("dict")
+                    dict.callAttr("__setitem__", "quiet", true)
+                    dict.callAttr("__setitem__", "skip_download", true)
+                    dict.callAttr("__setitem__", "no_color", true)
+
+                    val ydl = ytdlp.callAttr("YoutubeDL", dict)
+                    val rawInfo = ydl.callAttr("extract_info", url, false)
+
+                    val title = try { rawInfo.callAttr("get", "title").toString() } catch (e: Exception) { "Unknown" }
+                    val duration = try { rawInfo.callAttr("get", "duration").toString().toIntOrNull() ?: 0 } catch (e: Exception) { 0 }
+                    val thumbnail = try { rawInfo.callAttr("get", "thumbnail").toString() } catch (e: Exception) { "" }
+                    val uploader = try { rawInfo.callAttr("get", "uploader").toString() } catch (e: Exception) { "Unknown" }
+
+                    val minutes = duration / 60
+                    val seconds = duration % 60
+                    val durationStr = "%d:%02d".format(minutes, seconds)
+
+                    mapOf(
+                        "title" to title,
+                        "duration" to durationStr,
+                        "thumbnail" to thumbnail,
+                        "uploader" to uploader
+                    )
+                }
+
+                // Show preview card
+                previewCard.visibility = View.VISIBLE
+                videoTitle.text = info["title"]
+                videoUploader.text = "📺 ${info["uploader"]}"
+                videoDuration.text = "⏱ ${info["duration"]}"
+
+                Glide.with(this@MainActivity)
+                    .load(info["thumbnail"])
+                    .into(videoThumbnail)
+
+                statusText.text = "Ready to download!"
+
+            } catch (e: Exception) {
+                statusText.text = "❌ Error: ${e.message}"
+                previewCard.visibility = View.GONE
+            }
         }
     }
 
