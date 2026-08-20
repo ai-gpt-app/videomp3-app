@@ -67,6 +67,7 @@ chaquopy {
         pip {
             install("yt-dlp==2026.08.19")
             install("pydub==0.25.1")
+            install("imageio-ffmpeg==0.5.1")
         }
     }
 }

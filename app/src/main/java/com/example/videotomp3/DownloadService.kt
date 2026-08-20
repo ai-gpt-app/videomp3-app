@@ -20,6 +20,7 @@ class DownloadService : Service() {
         const val NOTIF_ID = 1
         const val EXTRA_URL = "url"
         const val EXTRA_QUALITY = "quality"
+        const val EXTRA_FORMAT = "format"
     }
 
     private val scope = CoroutineScope(Dispatchers.IO + kotlinx.coroutines.SupervisorJob())
@@ -37,7 +38,8 @@ class DownloadService : Service() {
             return START_NOT_STICKY
         }
         val quality = intent.getStringExtra(EXTRA_QUALITY) ?: "low"
-        android.util.Log.d("DownloadService", "Service started with URL: $url")
+        val selectedFormat = intent.getStringExtra(EXTRA_FORMAT) // optional exact format id
+        android.util.Log.d("DownloadService", "Service started with URL: $url, quality: $quality, format: $selectedFormat")
 
         createNotificationChannel()
         startForeground(NOTIF_ID, buildNotification("Preparing download...", 0))
@@ -46,7 +48,7 @@ class DownloadService : Service() {
         scope.launch {
             try {
                 android.util.Log.d("DownloadService", "Starting download coroutine")
-                val finalPath = download(url, quality)
+                val finalPath = download(url, quality, selectedFormat)
                 showCompletedNotification(finalPath)
                 kotlinx.coroutines.delay(1000)
             } catch (e: Exception) {
@@ -61,7 +63,7 @@ class DownloadService : Service() {
         return START_NOT_STICKY
     }
 
-    private fun download(url: String, quality: String): String {
+    private fun download(url: String, quality: String, selectedFormat: String?): String {
         val py = Python.getInstance()
         val ytdlp = py.getModule("yt_dlp")
         val builtins = py.builtins
@@ -71,16 +73,22 @@ class DownloadService : Service() {
             android.os.Environment.DIRECTORY_DOWNLOADS
         ).absolutePath
 
-        val format = when (quality) {
-            "low"  -> "worstaudio[ext=webm]/worstaudio/worst"
-            else   -> "bestaudio[ext=webm]/bestaudio/best"
-        }
-
         val dateStr = java.time.LocalDateTime.now()
             .format(java.time.format.DateTimeFormatter.ofPattern("yyMMdd_HHmmss"))
 
         val dict = builtins.callAttr("dict")
-        dict.callAttr("__setitem__", "format", format)
+
+        // If caller provided an exact yt-dlp format id, use it. Otherwise use quality-preferred format string.
+        if (!selectedFormat.isNullOrEmpty()) {
+            dict.callAttr("__setitem__", "format", selectedFormat)
+        } else {
+            val fmt = when (quality) {
+                "low"  -> "worstaudio[vcodec=none][ext=webm]/worstaudio/worst"
+                else   -> "bestaudio[vcodec=none][ext=m4a]/bestaudio[vcodec=none][ext=mp4]/bestaudio[vcodec=none][ext=webm]/bestaudio/best"
+            }
+            dict.callAttr("__setitem__", "format", fmt)
+        }
+
         dict.callAttr("__setitem__", "outtmpl", "$outputDir/%(title).30s_${dateStr}.%(ext)s")
         dict.callAttr("__setitem__", "noplaylist", true)
         dict.callAttr("__setitem__", "quiet", true)
@@ -112,7 +120,6 @@ class DownloadService : Service() {
             ydl.callAttr("__exit__", null, null, null)
         }
 
-        // Rename downloaded file to .mp3 (or use existing mp3)
         updateProgress(100, "Converting to MP3...")
         val downloadedFile = File(outputDir)
             .listFiles()
@@ -121,14 +128,23 @@ class DownloadService : Service() {
 
         var finalPath = outputDir
         if (downloadedFile != null) {
-            val mp3File = if (downloadedFile.name.endsWith(".mp3")) {
+            val actualAudioFile = if (downloadedFile.name.endsWith(".mp3", ignoreCase = true)) {
                 downloadedFile
             } else {
-                File(outputDir, downloadedFile.nameWithoutExtension + ".mp3").also { downloadedFile.renameTo(it) }
+                val mp3File = File(outputDir, downloadedFile.nameWithoutExtension + ".mp3")
+                val converter = py.getModule("convert_audio")
+                val convertedPath = converter.callAttr("convert_to_mp3", downloadedFile.absolutePath, mp3File.absolutePath, quality)
+                val convertedFile = File(convertedPath.toString())
+                if (!convertedFile.exists()) {
+                    throw IllegalStateException("FFmpeg conversion did not create output file")
+                }
+                downloadedFile.delete()
+                convertedFile
             }
-            android.util.Log.d("DownloadService", "Saved as: ${mp3File.absolutePath}")
-            scanFile(mp3File.absolutePath)
-            finalPath = mp3File.absolutePath
+
+            android.util.Log.d("DownloadService", "Saved as: ${actualAudioFile.absolutePath}")
+            scanFile(actualAudioFile.absolutePath)
+            finalPath = actualAudioFile.absolutePath
         }
 
         return finalPath
@@ -210,10 +226,18 @@ class DownloadService : Service() {
     }
 
     private fun scanFile(filePath: String) {
+        val mimeType = when {
+            filePath.endsWith(".m4a", ignoreCase = true) -> "audio/mp4"
+            filePath.endsWith(".webm", ignoreCase = true) -> "audio/webm"
+            filePath.endsWith(".aac", ignoreCase = true) -> "audio/aac"
+            filePath.endsWith(".opus", ignoreCase = true) -> "audio/opus"
+            else -> "audio/mpeg"
+        }
+
         android.media.MediaScannerConnection.scanFile(
             applicationContext,
             arrayOf(filePath),
-            arrayOf("audio/mpeg"),
+            arrayOf(mimeType),
             null
         )
     }
