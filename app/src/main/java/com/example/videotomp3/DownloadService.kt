@@ -10,6 +10,7 @@ import com.chaquo.python.Python
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import androidx.core.content.FileProvider
 import java.io.File
 
 class DownloadService : Service() {
@@ -39,14 +40,14 @@ class DownloadService : Service() {
         android.util.Log.d("DownloadService", "Service started with URL: $url")
 
         createNotificationChannel()
-        startForeground(NOTIF_ID, buildNotification("Starting download...", 0))
+        startForeground(NOTIF_ID, buildNotification("Preparing download...", 0))
         android.util.Log.d("DownloadService", "Foreground started, launching coroutine")
 
         scope.launch {
             try {
                 android.util.Log.d("DownloadService", "Starting download coroutine")
-                val outputDir = download(url, quality)
-                showCompletedNotification(outputDir)
+                val finalPath = download(url, quality)
+                showCompletedNotification(finalPath)
                 kotlinx.coroutines.delay(1000)
             } catch (e: Exception) {
                 android.util.Log.e("DownloadService", "Download failed: ${e.message}", e)
@@ -111,22 +112,26 @@ class DownloadService : Service() {
             ydl.callAttr("__exit__", null, null, null)
         }
 
-        // Rename downloaded file to .mp3
-        // Convert to real MP3 using ffmpeg via linker64
+        // Rename downloaded file to .mp3 (or use existing mp3)
         updateProgress(100, "Converting to MP3...")
         val downloadedFile = File(outputDir)
             .listFiles()
             ?.filter { it.isFile }
             ?.maxByOrNull { it.lastModified() }
 
-        if (downloadedFile != null && !downloadedFile.name.endsWith(".mp3")) {
-            val mp3File = File(outputDir, downloadedFile.nameWithoutExtension + ".mp3")
-            downloadedFile.renameTo(mp3File)
+        var finalPath = outputDir
+        if (downloadedFile != null) {
+            val mp3File = if (downloadedFile.name.endsWith(".mp3")) {
+                downloadedFile
+            } else {
+                File(outputDir, downloadedFile.nameWithoutExtension + ".mp3").also { downloadedFile.renameTo(it) }
+            }
             android.util.Log.d("DownloadService", "Saved as: ${mp3File.absolutePath}")
             scanFile(mp3File.absolutePath)
+            finalPath = mp3File.absolutePath
         }
 
-        return outputDir
+        return finalPath
     }
 
     fun updateProgress(percent: Int, title: String = "Downloading...") {
@@ -143,31 +148,33 @@ class DownloadService : Service() {
             .setOngoing(true)
             .build()
 
-    private fun showCompletedNotification(outputDir: String) {
+    private fun showCompletedNotification(finalPath: String) {
         val manager = getSystemService(NotificationManager::class.java)
-        val intent = Intent(android.content.Intent.ACTION_VIEW).apply {
-            setDataAndType(
-                android.net.Uri.parse(outputDir),
-                "resource/folder"
-            )
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK
-        }
-        val fallbackIntent = Intent(android.app.DownloadManager.ACTION_VIEW_DOWNLOADS).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+
+        val file = File(finalPath)
+        val intent = try {
+            val uri = FileProvider.getUriForFile(this, "${applicationContext.packageName}.provider", file)
+            Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, "audio/*")
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+        } catch (e: Exception) {
+            // Fallback to open Downloads view
+            Intent(android.app.DownloadManager.ACTION_VIEW_DOWNLOADS).apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK }
         }
 
         val pendingIntent = android.app.PendingIntent.getActivity(
             this,
             0,
-            fallbackIntent,
+            intent,
             android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
         )
 
         val notif = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("✅ Video to MP3 - Complete!")
             .setStyle(
                 NotificationCompat.BigTextStyle()
-                    .bigText("✅ Download complete!\nSaved to: $outputDir\n\nTap to open Downloads folder")
+                    .bigText("✅Saved to: $finalPath\n\nTap to open file")
             )
             .setSmallIcon(android.R.drawable.stat_sys_download_done)
             .setAutoCancel(true)
@@ -181,10 +188,14 @@ class DownloadService : Service() {
     private fun showErrorNotification(error: String) {
         val manager = getSystemService(NotificationManager::class.java)
         val notif = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Video to MP3")
-            .setContentText("❌ Failed: $error")
+            .setContentTitle("Video to MP3 - Failed")
+            .setStyle(
+                NotificationCompat.BigTextStyle()
+                    .bigText("❌ Failed: $error\n\nTap to retry or open app for details")
+            )
             .setSmallIcon(android.R.drawable.stat_notify_error)
-            .setAutoCancel(true)
+            .setAutoCancel(false)
+            .setOngoing(false)
             .build()
         manager.notify(NOTIF_ID, notif)
     }

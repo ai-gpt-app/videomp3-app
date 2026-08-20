@@ -65,8 +65,8 @@ chaquopy {
     defaultConfig {
         version = "3.11"
         pip {
-            install("yt-dlp")
-            install("pydub")
+            install("yt-dlp==2026.08.19")
+            install("pydub==0.25.1")
         }
     }
 }
