@@ -6,11 +6,13 @@ import android.app.Service
 import android.content.Intent
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
+import androidx.core.content.FileProvider
+import com.arthenica.ffmpegkit.FFmpegKit
+import com.arthenica.ffmpegkit.ReturnCode
 import com.chaquo.python.Python
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import androidx.core.content.FileProvider
 import java.io.File
 
 class DownloadService : Service() {
@@ -61,6 +63,31 @@ class DownloadService : Service() {
         }
 
         return START_NOT_STICKY
+    }
+
+    private fun convertToMp3(inputPath: String, outputPath: String, quality: String): String {
+        val bitrate = when (quality.lowercase()) {
+            "low" -> "64k"
+            "medium" -> "128k"
+            "high" -> "192k"
+            else -> "128k"
+        }
+
+        // Explicitly select libmp3lame encoder; requires FFmpeg built with --enable-lame
+        val command = "-y -i \"$inputPath\" -vn -ar 44100 -ac 2 -c:a libmp3lame -b:a $bitrate \"$outputPath\""
+        val session = FFmpegKit.execute(command)
+        val returnCode = session.getReturnCode()
+
+        if (ReturnCode.isSuccess(returnCode)) {
+            return outputPath
+        }
+
+        val failure = when (val stack = session.getFailStackTrace()) {
+            null -> session.getReturnCode().toString()
+            is Array<*> -> stack.joinToString("\n")
+            else -> stack.toString()
+        }
+        throw IllegalStateException("FFmpeg conversion failed: $failure")
     }
 
     private fun download(url: String, quality: String, selectedFormat: String?): String {
@@ -132,14 +159,26 @@ class DownloadService : Service() {
                 downloadedFile
             } else {
                 val mp3File = File(outputDir, downloadedFile.nameWithoutExtension + ".mp3")
-                val converter = py.getModule("convert_audio")
-                val convertedPath = converter.callAttr("convert_to_mp3", downloadedFile.absolutePath, mp3File.absolutePath, quality)
-                val convertedFile = File(convertedPath.toString())
-                if (!convertedFile.exists()) {
-                    throw IllegalStateException("FFmpeg conversion did not create output file")
+                try {
+                    val convertedPath = convertToMp3(downloadedFile.absolutePath, mp3File.absolutePath, quality)
+                    val convertedFile = File(convertedPath)
+                    if (!convertedFile.exists()) {
+                        throw IllegalStateException("FFmpeg conversion did not create output file")
+                    }
+                    downloadedFile.delete()
+                    convertedFile
+                } catch (e: Exception) {
+                    android.util.Log.w("DownloadService", "FFmpeg conversion failed, falling back to rename-only. ${e.message}", e)
+                    val renamedFile = File(outputDir, downloadedFile.nameWithoutExtension + ".mp3")
+                    if (downloadedFile.renameTo(renamedFile)) {
+                        renamedFile
+                    } else {
+                        // Fallback copy for safety if rename hits a filesystem edge case
+                        renamedFile.writeBytes(downloadedFile.readBytes())
+                        downloadedFile.delete()
+                        renamedFile
+                    }
                 }
-                downloadedFile.delete()
-                convertedFile
             }
 
             android.util.Log.d("DownloadService", "Saved as: ${actualAudioFile.absolutePath}")

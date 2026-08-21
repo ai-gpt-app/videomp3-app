@@ -33,6 +33,22 @@ A powerful Android application that converts videos from various online platform
   - Min SDK: 32
   - Target SDK: 36
   - Compile SDK: 36
+- **FFmpegKitNext**: Build the Android archive locally from the cloned repo at `D:\github\backend\ffmpeg-kit-next` before compiling this app. The app points at the generated Maven repo under `prebuilt/bundle-android-aar-24-maven`.
+
+### FFmpegKitNext local build
+
+```powershell
+cd D:\github\backend\ffmpeg-kit-next
+./nix-android.sh -p android-r27d
+```
+
+This must run on a supported host (Linux/macOS; WSL is recommended on Windows). It produces a local Maven repository such as:
+
+```text
+D:\github\backend\ffmpeg-kit-next\prebuilt\bundle-android-aar-24-maven\com\arthenica\ffmpeg-kit-next\8.1.1\
+```
+
+Once that repo exists, this project can resolve `com.arthenica:ffmpeg-kit-next:8.1.1` normally.
 
 ## 🚀 Getting Started
 

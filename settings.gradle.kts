@@ -18,6 +18,8 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        // Local FFmpegKitNext AAR produced by the cloned repo at D:\github\backend\ffmpeg-kit-next
+        maven { url = uri("file:///D:/github/backend/ffmpeg-kit-next/prebuilt/bundle-android-aar-24-maven") }
         maven { url = uri("https://jitpack.io") }
     }
 }

@@ -67,7 +67,6 @@ chaquopy {
         pip {
             install("yt-dlp==2026.08.19")
             install("pydub==0.25.1")
-            install("imageio-ffmpeg==0.5.1")
         }
     }
 }
@@ -91,4 +90,6 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
     implementation("androidx.cardview:cardview:1.0.0")
+    // Local FFmpegKitNext AAR (built from your ffmpeg-kit-next repo)
+    implementation("com.arthenica:ffmpeg-kit-next:8.1.1")
 }

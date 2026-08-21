@@ -38,7 +38,6 @@ class MainActivity : ComponentActivity() {
         val convertButton = findViewById<Button>(R.id.convertButton)
         val statusText = findViewById<TextView>(R.id.statusText)
         val qualityGroup = findViewById<RadioGroup>(R.id.qualityGroup)
-        val languageGroup = findViewById<RadioGroup>(R.id.languageGroup)
         val previewCard = findViewById<CardView>(R.id.previewCard)
         val videoThumbnail = findViewById<ImageView>(R.id.videoThumbnail)
         val videoTitle = findViewById<TextView>(R.id.videoTitle)
@@ -140,13 +139,25 @@ class MainActivity : ComponentActivity() {
         }
 
         val preferredExtOrder = listOf("m4a", "mp4", "webm")
-        val candidates = formats.filter {
+        var candidates = formats.filter {
             val language = it["language"] ?: ""
             val acodec = it["acodec"] ?: ""
             acodec != "none" && language.startsWith(targetLanguage, ignoreCase = true)
         }
 
         if (candidates.isEmpty()) return null
+
+        // Exclude m3u8 HLS formats (233, 234, etc.) - they're fragmented and slow
+        // Prefer formats with direct HTTP/HTTPS downloads (139-140, 249-251, etc.)
+        val nonHlsFormats = candidates.filter { 
+            val formatId = (it["format_id"] ?: "").toIntOrNull() ?: 999
+            // Exclude 233-234 range (HLS), keep 139-140, 249-251, etc.
+            formatId !in (233..234)
+        }
+        
+        if (nonHlsFormats.isNotEmpty()) {
+            candidates = nonHlsFormats
+        }
 
         val selected = when (quality) {
             "low" -> candidates.minByOrNull {
@@ -169,6 +180,9 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        val selected_id = selected?.get("format_id") ?: "none"
+        android.util.Log.d("MainActivity", "Selected format ID: $selected_id (language: $targetLanguage, quality: $quality)")
+        
         return selected?.get("format_id")
     }
 
