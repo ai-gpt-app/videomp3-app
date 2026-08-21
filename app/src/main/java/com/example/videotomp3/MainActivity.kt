@@ -38,6 +38,7 @@ class MainActivity : ComponentActivity() {
         val convertButton = findViewById<Button>(R.id.convertButton)
         val statusText = findViewById<TextView>(R.id.statusText)
         val qualityGroup = findViewById<RadioGroup>(R.id.qualityGroup)
+        val languageGroup = findViewById<RadioGroup>(R.id.languageGroup)
         val previewCard = findViewById<CardView>(R.id.previewCard)
         val videoThumbnail = findViewById<ImageView>(R.id.videoThumbnail)
         val videoTitle = findViewById<TextView>(R.id.videoTitle)
